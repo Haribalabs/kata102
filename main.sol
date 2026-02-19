@@ -718,3 +718,51 @@ contract BladeForgeVault {
     struct UserOverview {
         uint256 totalCollateralValueWad;
         uint256 totalDebtValueWad;
+        uint256 healthFactorWad;
+        uint256 maxBorrowValueWad;
+        bool liquidatable;
+        uint256 assetCountWithPosition;
+    }
+
+    function getUserOverview(address user) external view returns (UserOverview memory) {
+        uint256 collateralVal = _totalCollateralValueWad(user);
+        uint256 debtVal = 0;
+        uint256 maxBorrowVal = 0;
+        uint256 positionsCount = 0;
+        for (uint256 i = 0; i < _assetList.length; i++) {
+            address a = _assetList[i];
+            uint256 b = _borrowBalanceInternal(user, a);
+            if (b > 0 && oraclePriceWad[a] > 0) debtVal += b * oraclePriceWad[a];
+            if (positions[user][a].supplied > 0 || b > 0) positionsCount++;
+            uint256 cfBps = assetConfigs[a].collateralFactorBps;
+            if (positions[user][a].collateralEnabled && positions[user][a].supplied > 0 && oraclePriceWad[a] > 0) {
+                maxBorrowVal += (positions[user][a].supplied * oraclePriceWad[a] * cfBps) / BPS_DENOM;
+            }
+        }
+        if (debtVal > maxBorrowVal) maxBorrowVal = 0; else maxBorrowVal -= debtVal;
+        uint256 health = debtVal == 0 ? type(uint256).max : (collateralVal * SCALE) / debtVal;
+        uint256 thresholdVal = 0;
+        for (uint256 j = 0; j < _assetList.length; j++) {
+            address a = _assetList[j];
+            Position storage pos = positions[user][a];
+            if (pos.collateralEnabled && pos.supplied > 0 && oraclePriceWad[a] > 0)
+                thresholdVal += (pos.supplied * oraclePriceWad[a] * assetConfigs[a].liquidationThresholdBps) / BPS_DENOM;
+        }
+        uint256 healthLt = debtVal == 0 ? type(uint256).max : (thresholdVal * SCALE) / debtVal;
+        return UserOverview({
+            totalCollateralValueWad: collateralVal,
+            totalDebtValueWad: debtVal,
+            healthFactorWad: healthLt,
+            maxBorrowValueWad: maxBorrowVal,
+            liquidatable: healthLt < MIN_HEALTH_FACTOR_LIQUIDATABLE,
+            assetCountWithPosition: positionsCount
+        });
+    }
+
+    struct AssetConfigView {
+        address asset;
+        bool allowed;
+        bool borrowEnabled;
+        bool depositsFrozen;
+        uint256 collateralFactorBps;
+        uint256 liquidationThresholdBps;
