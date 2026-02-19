@@ -526,3 +526,51 @@ contract BladeForgeVault {
             emit FeeSwept(recipient, send);
         }
     }
+
+    function getAssetList() external view returns (address[] memory) {
+        return _assetList;
+    }
+
+    function getBorrowBalance(address user, address asset) external view returns (uint256) {
+        return _borrowBalanceInternal(user, asset);
+    }
+
+    function getHealthFactorWad(address user) external view returns (uint256) {
+        uint256 debtVal;
+        uint256 thresholdVal;
+        for (uint256 i = 0; i < _assetList.length; i++) {
+            address a = _assetList[i];
+            uint256 borrows = _borrowBalanceInternal(user, a);
+            if (borrows > 0 && oraclePriceWad[a] > 0) debtVal += borrows * oraclePriceWad[a];
+            Position storage pos = positions[user][a];
+            if (pos.collateralEnabled && pos.supplied > 0 && oraclePriceWad[a] > 0) {
+                thresholdVal += (pos.supplied * oraclePriceWad[a] * assetConfigs[a].liquidationThresholdBps) / BPS_DENOM;
+            }
+        }
+        if (debtVal == 0) return type(uint256).max;
+        return (thresholdVal * SCALE) / debtVal;
+    }
+
+    function getUtilization(address asset) external view returns (uint256) {
+        AssetState storage state = assetStates[asset];
+        if (state.totalSupply == 0) return 0;
+        return (state.totalBorrows * SCALE) / state.totalSupply;
+    }
+
+    function getCurrentRatePerBlock(address asset) external view returns (uint256) {
+        AssetState storage state = assetStates[asset];
+        if (state.totalSupply == 0) return assetConfigs[asset].baseRatePerBlock;
+        uint256 utilization = (state.totalBorrows * SCALE) / state.totalSupply;
+        return _computeRatePerBlock(assetConfigs[asset], utilization);
+    }
+
+    struct PositionSummary {
+        address asset;
+        uint256 supplied;
+        uint256 borrowed;
+        uint256 borrowBalanceCurrent;
+        bool collateralEnabled;
+        uint256 priceWad;
+    }
+
+    function getPositionSummary(address user) external view returns (PositionSummary[] memory) {
