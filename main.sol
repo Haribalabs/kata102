@@ -286,3 +286,51 @@ contract BladeForgeVault {
 
     function _computeRatePerBlock(AssetConfig memory config, uint256 utilizationWad) internal pure returns (uint256) {
         uint256 opt = (config.optimalUtilizationBps * SCALE) / BPS_DENOM;
+        if (utilizationWad <= opt) {
+            return config.baseRatePerBlock + (config.slope1PerBlock * utilizationWad) / opt;
+        }
+        uint256 excess = utilizationWad - opt;
+        uint256 slope2Part = (config.slope2PerBlock * excess) / (SCALE - opt);
+        return config.baseRatePerBlock + config.slope1PerBlock + slope2Part;
+    }
+
+    function supply(address asset, uint256 amount) external nonReentrant whenNotPaused assetListed(asset) {
+        if (amount == 0) revert BladeForge_InvalidAmount();
+        if (assetConfigs[asset].depositsFrozen) revert BladeForge_DepositsFrozen();
+        uint256 cap = supplyCap[asset];
+        if (cap != 0 && assetStates[asset].totalSupply + amount > cap) revert BladeForge_SupplyCapExceeded();
+
+        _accrueInterest(asset);
+
+        IERC20Minimal token = IERC20Minimal(asset);
+        uint256 balBefore = token.balanceOf(address(this));
+        if (!token.transferFrom(msg.sender, address(this), amount)) revert BladeForge_TransferFailed();
+        uint256 received = token.balanceOf(address(this)) - balBefore;
+        if (received != amount) revert BladeForge_InvalidAmount();
+
+        AssetState storage state = assetStates[asset];
+        Position storage pos = positions[msg.sender][asset];
+        state.totalSupply += received;
+        pos.supplied += received;
+        pos.borrowIndexSnapshot = state.indexCumulative;
+        lastActivityBlock[asset] = block.number;
+
+        emit Supply(msg.sender, asset, received);
+    }
+
+    function withdraw(address asset, uint256 amount) external nonReentrant whenNotPaused assetListed(asset) {
+        if (amount == 0) revert BladeForge_InvalidAmount();
+
+        _accrueInterest(asset);
+
+        Position storage pos = positions[msg.sender][asset];
+        uint256 supplied = pos.supplied;
+        if (amount > supplied) revert BladeForge_InvalidAmount();
+
+        uint256 borrows = _borrowBalanceInternal(msg.sender, asset);
+        if (pos.collateralEnabled && borrows > 0) {
+            uint256 newSupplied = supplied - amount;
+            uint256 health = _healthFactorWad(msg.sender, asset, newSupplied, borrows);
+            if (health < MIN_HEALTH_FACTOR_LIQUIDATABLE) revert BladeForge_HealthFactorTooLow();
+        }
+
