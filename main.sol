@@ -670,3 +670,51 @@ contract BladeForgeVault {
         return (
             totalAssets,
             totalTvlWad,
+            totalProtocolFeesAccrued,
+            totalLiquidationsWei,
+            DEPLOY_TIMESTAMP,
+            vaultPaused
+        );
+    }
+
+    function emergencyRecover(address token, address to, uint256 amount) external onlyGovernor nonReentrant {
+        if (!vaultPaused) revert BladeForge_EmergencyOnlyWhenPaused();
+        if (to == address(0)) revert BladeForge_ZeroAddress();
+        if (token == address(0)) {
+            uint256 bal = address(this).balance;
+            uint256 send = amount == 0 ? bal : (amount > bal ? bal : amount);
+            if (send > 0) {
+                (bool ok,) = payable(to).call{ value: send }("");
+                if (!ok) revert BladeForge_TransferFailed();
+            }
+        } else {
+            uint256 bal = IERC20Minimal(token).balanceOf(address(this));
+            uint256 send = amount == 0 ? bal : (amount > bal ? bal : amount);
+            if (send > 0 && !IERC20Minimal(token).transfer(to, send)) revert BladeForge_TransferFailed();
+        }
+    }
+
+    function getConstants() external pure returns (
+        uint256 scale,
+        uint256 bpsDenom,
+        uint256 maxAssets,
+        uint256 minHealthFactorLiquidatable
+    ) {
+        return (SCALE, BPS_DENOM, MAX_ASSETS, MIN_HEALTH_FACTOR_LIQUIDATABLE);
+    }
+
+    function isLiquidatable(address user) external view returns (bool) {
+        return getHealthFactorWad(user) < MIN_HEALTH_FACTOR_LIQUIDATABLE;
+    }
+
+    function getAccrualBlock(address asset) external view returns (uint256) {
+        return assetStates[asset].accrualBlockNumber;
+    }
+
+    function getLastActivityBlock(address asset) external view returns (uint256) {
+        return lastActivityBlock[asset];
+    }
+
+    struct UserOverview {
+        uint256 totalCollateralValueWad;
+        uint256 totalDebtValueWad;
