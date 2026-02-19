@@ -910,3 +910,51 @@ contract BladeForgeVault {
 
     function canSupply(address asset) external view returns (bool) {
         return isListedAsset[asset] && !assetConfigs[asset].depositsFrozen && !vaultPaused;
+    }
+
+    function computeHealthFactorFromBalances(
+        uint256 collateralValueWad,
+        uint256 debtValueWad,
+        uint256 liquidationThresholdBps
+    ) external pure returns (uint256 healthWad) {
+        if (debtValueWad == 0) return type(uint256).max;
+        uint256 thresholdVal = (collateralValueWad * liquidationThresholdBps) / BPS_DENOM;
+        return (thresholdVal * SCALE) / debtValueWad;
+    }
+
+    function getScaledBorrowBalance(address user, address asset) external view returns (uint256 principal, uint256 index) {
+        Position storage pos = positions[user][asset];
+        return (pos.borrowed, pos.borrowIndexSnapshot);
+    }
+
+    struct DashboardAsset {
+        address asset;
+        uint256 totalSupply;
+        uint256 totalBorrows;
+        uint256 utilizationWad;
+        uint256 ratePerBlock;
+        uint256 apyBpsEst;
+        uint256 priceWad;
+        bool borrowEnabled;
+        bool depositsFrozen;
+        uint256 collateralFactorBps;
+        uint256 liquidationThresholdBps;
+    }
+
+    function getDashboardAssets() external view returns (DashboardAsset[] memory) {
+        uint256 n = _assetList.length;
+        DashboardAsset[] memory out = new DashboardAsset[](n);
+        for (uint256 i = 0; i < n; i++) {
+            address a = _assetList[i];
+            AssetState storage s = assetStates[a];
+            AssetConfig storage c = assetConfigs[a];
+            uint256 util = s.totalSupply == 0 ? 0 : (s.totalBorrows * SCALE) / s.totalSupply;
+            uint256 rate = s.totalSupply == 0 ? c.baseRatePerBlock : _computeRatePerBlock(c, util);
+            uint256 apyBps = (rate * BLOCKS_PER_YEAR_EST * BPS_DENOM) / SCALE;
+            out[i] = DashboardAsset({
+                asset: a,
+                totalSupply: s.totalSupply,
+                totalBorrows: s.totalBorrows,
+                utilizationWad: util,
+                ratePerBlock: rate,
+                apyBpsEst: apyBps,
