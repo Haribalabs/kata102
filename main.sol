@@ -814,3 +814,51 @@ contract BladeForgeVault {
     function simulateBorrow(address user, address asset, uint256 amount) external view returns (
         bool allowed,
         uint256 newHealthWad,
+        uint256 capacityRemainingWad
+    ) {
+        if (!isListedAsset[asset] || !assetConfigs[asset].borrowEnabled) return (false, 0, 0);
+        uint256 cap = borrowCap[asset];
+        if (cap != 0 && assetStates[asset].totalBorrows + amount > cap) return (false, 0, 0);
+        uint256 collateralVal = _totalCollateralValueWad(user);
+        uint256 borrowsBefore = _borrowBalanceInternal(user, asset);
+        uint256 newBorrows = borrowsBefore + amount;
+        uint256 borrowValueWad = _totalBorrowValueWad(user, asset, newBorrows);
+        uint256 capacity = (collateralVal * assetConfigs[asset].collateralFactorBps) / BPS_DENOM;
+        if (borrowValueWad > capacity) return (false, 0, capacity > _totalBorrowValueWad(user, asset, borrowsBefore) ? capacity - _totalBorrowValueWad(user, asset, borrowsBefore) : 0);
+        newHealthWad = _healthFactorWad(user, asset, positions[user][asset].supplied, newBorrows);
+        if (newHealthWad < MIN_HEALTH_FACTOR_LIQUIDATABLE) return (false, newHealthWad, 0);
+        capacityRemainingWad = capacity > borrowValueWad ? (capacity - borrowValueWad) / (oraclePriceWad[asset] == 0 ? 1 : oraclePriceWad[asset]) : 0;
+        return (true, newHealthWad, capacityRemainingWad);
+    }
+
+    function simulateWithdraw(address user, address asset, uint256 amount) external view returns (
+        bool allowed,
+        uint256 newHealthWad
+    ) {
+        if (!isListedAsset[asset]) return (false, 0);
+        Position storage pos = positions[user][asset];
+        if (amount > pos.supplied) return (false, 0);
+        uint256 borrows = _borrowBalanceInternal(user, asset);
+        if (!pos.collateralEnabled || borrows == 0) return (true, type(uint256).max);
+        newHealthWad = _healthFactorWad(user, asset, pos.supplied - amount, borrows);
+        return (newHealthWad >= MIN_HEALTH_FACTOR_LIQUIDATABLE, newHealthWad);
+    }
+
+    uint256 private constant BLOCKS_PER_YEAR_EST = 2628000;
+
+    function getEstimatedApyBps(address asset) external view returns (uint256 apyBps) {
+        AssetState storage state = assetStates[asset];
+        if (state.totalSupply == 0) return 0;
+        uint256 utilization = (state.totalBorrows * SCALE) / state.totalSupply;
+        uint256 ratePerBlock = _computeRatePerBlock(assetConfigs[asset], utilization);
+        return (ratePerBlock * BLOCKS_PER_YEAR_EST * BPS_DENOM) / SCALE;
+    }
+
+    function getGovernanceAddresses() external view returns (
+        address governor,
+        address feeRecipient,
+        address priceFeed,
+        address treasuryBackup
+    ) {
+        return (GOVERNOR, FEE_RECIPIENT, PRICE_FEED, TREASURY_BACKUP);
+    }
