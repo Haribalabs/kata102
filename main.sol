@@ -478,3 +478,51 @@ contract BladeForgeVault {
         return total;
     }
 
+    function _totalBorrowValueWad(address user, address excludeAsset, uint256 excludeBorrowAdd) internal view returns (uint256) {
+        uint256 total;
+        for (uint256 i = 0; i < _assetList.length; i++) {
+            address a = _assetList[i];
+            uint256 borrows = _borrowBalanceInternal(user, a);
+            if (a == excludeAsset) borrows = excludeBorrowAdd;
+            if (borrows == 0) continue;
+            uint256 price = oraclePriceWad[a];
+            if (price == 0) continue;
+            total += borrows * price;
+        }
+        return total;
+    }
+
+    function _healthFactorWad(address user, address borrowAsset, uint256 suppliedCollateral, uint256 borrows) internal view returns (uint256) {
+        uint256 collateralVal = _totalCollateralValueWad(user);
+        Position storage pos = positions[user][borrowAsset];
+        uint256 otherBorrows = _totalBorrowValueWad(user, borrowAsset, 0);
+        uint256 totalDebtVal = otherBorrows + (borrows * oraclePriceWad[borrowAsset]);
+        uint256 thresholdVal = 0;
+        if (pos.collateralEnabled && suppliedCollateral > 0 && oraclePriceWad[borrowAsset] > 0) {
+            thresholdVal = (suppliedCollateral * oraclePriceWad[borrowAsset] * assetConfigs[borrowAsset].liquidationThresholdBps) / BPS_DENOM;
+        }
+        uint256 totalThreshold = (collateralVal * assetConfigs[borrowAsset].liquidationThresholdBps) / BPS_DENOM;
+        if (totalDebtVal == 0) return type(uint256).max;
+        return (totalThreshold * SCALE) / totalDebtVal;
+    }
+
+    function sweepFees(address token, uint256 amount) external onlyGovernor nonReentrant {
+        address recipient = FEE_RECIPIENT != address(0) ? FEE_RECIPIENT : TREASURY_BACKUP;
+        if (token == address(0)) {
+            uint256 bal = address(this).balance;
+            uint256 send = amount == 0 ? bal : (amount > bal ? bal : amount);
+            if (send == 0) return;
+            (bool ok,) = payable(recipient).call{ value: send }("");
+            if (!ok) revert BladeForge_TransferFailed();
+            emit FeeSwept(recipient, send);
+        } else {
+            if (!isListedAsset[token]) revert BladeForge_AssetNotListed();
+            uint256 bal = IERC20Minimal(token).balanceOf(address(this));
+            uint256 supply = assetStates[token].totalSupply;
+            uint256 available = bal > supply ? bal - supply : 0;
+            uint256 send = amount == 0 ? available : (amount > available ? available : amount);
+            if (send == 0) return;
+            if (!IERC20Minimal(token).transfer(recipient, send)) revert BladeForge_TransferFailed();
+            emit FeeSwept(recipient, send);
+        }
+    }
