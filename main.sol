@@ -766,3 +766,51 @@ contract BladeForgeVault {
         bool depositsFrozen;
         uint256 collateralFactorBps;
         uint256 liquidationThresholdBps;
+        uint256 liquidationBonusBps;
+        uint256 reserveFactorBps;
+        uint256 baseRatePerBlock;
+        uint256 optimalUtilizationBps;
+    }
+
+    function getAssetConfigView(address asset) external view returns (AssetConfigView memory) {
+        if (!isListedAsset[asset]) revert BladeForge_AssetNotListed();
+        AssetConfig storage c = assetConfigs[asset];
+        return AssetConfigView({
+            asset: asset,
+            allowed: c.allowed,
+            borrowEnabled: c.borrowEnabled,
+            depositsFrozen: c.depositsFrozen,
+            collateralFactorBps: c.collateralFactorBps,
+            liquidationThresholdBps: c.liquidationThresholdBps,
+            liquidationBonusBps: c.liquidationBonusBps,
+            reserveFactorBps: c.reserveFactorBps,
+            baseRatePerBlock: c.baseRatePerBlock,
+            optimalUtilizationBps: c.optimalUtilizationBps
+        });
+    }
+
+    function getAllAssetsConfigView() external view returns (AssetConfigView[] memory) {
+        uint256 n = _assetList.length;
+        AssetConfigView[] memory out = new AssetConfigView[](n);
+        for (uint256 i = 0; i < n; i++) {
+            address a = _assetList[i];
+            AssetConfig storage c = assetConfigs[a];
+            out[i] = AssetConfigView({
+                asset: a,
+                allowed: c.allowed,
+                borrowEnabled: c.borrowEnabled,
+                depositsFrozen: c.depositsFrozen,
+                collateralFactorBps: c.collateralFactorBps,
+                liquidationThresholdBps: c.liquidationThresholdBps,
+                liquidationBonusBps: c.liquidationBonusBps,
+                reserveFactorBps: c.reserveFactorBps,
+                baseRatePerBlock: c.baseRatePerBlock,
+                optimalUtilizationBps: c.optimalUtilizationBps
+            });
+        }
+        return out;
+    }
+
+    function simulateBorrow(address user, address asset, uint256 amount) external view returns (
+        bool allowed,
+        uint256 newHealthWad,
