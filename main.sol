@@ -430,3 +430,51 @@ contract BladeForgeVault {
         AssetConfig memory collateralConfig = assetConfigs[collateralAsset];
         uint256 bonusBps = collateralConfig.liquidationBonusBps;
         uint256 debtPrice = oraclePriceWad[debtAsset];
+        uint256 collateralPrice = oraclePriceWad[collateralAsset];
+        if (debtPrice == 0 || collateralPrice == 0) revert BladeForge_InvalidConfig();
+        uint256 collateralValueOfDebt = (debtToCover * debtPrice) / collateralPrice;
+        uint256 collateralToSeize = (collateralValueOfDebt * (BPS_DENOM + bonusBps)) / BPS_DENOM;
+
+        Position storage pos = positions[user][collateralAsset];
+        uint256 userCollateral = pos.supplied;
+        if (collateralToSeize > userCollateral) collateralToSeize = userCollateral;
+
+        Position storage debtPos = positions[user][debtAsset];
+        AssetState storage debtState = assetStates[debtAsset];
+        uint256 principalCover = (debtToCover * debtPos.borrowIndexSnapshot) / debtState.indexCumulative;
+        if (principalCover > debtPos.borrowed) principalCover = debtPos.borrowed;
+
+        debtPos.borrowed -= principalCover;
+        debtPos.borrowIndexSnapshot = debtState.indexCumulative;
+        debtState.totalBorrows -= (debtToCover * debtState.totalBorrows) / (debtBalance);
+        pos.supplied -= collateralToSeize;
+        assetStates[collateralAsset].totalSupply -= collateralToSeize;
+
+        totalLiquidationsWei += collateralToSeize;
+
+        if (!IERC20Minimal(debtAsset).transferFrom(msg.sender, address(this), debtToCover)) revert BladeForge_TransferFailed();
+        if (!IERC20Minimal(collateralAsset).transfer(msg.sender, collateralToSeize)) revert BladeForge_TransferFailed();
+
+        emit Liquidate(msg.sender, user, collateralAsset, debtAsset, debtToCover, collateralToSeize);
+    }
+
+    function _borrowBalanceInternal(address user, address asset) internal view returns (uint256) {
+        Position storage pos = positions[user][asset];
+        if (pos.borrowed == 0) return 0;
+        AssetState storage state = assetStates[asset];
+        return (pos.borrowed * state.indexCumulative) / pos.borrowIndexSnapshot;
+    }
+
+    function _totalCollateralValueWad(address user) internal view returns (uint256) {
+        uint256 total;
+        for (uint256 i = 0; i < _assetList.length; i++) {
+            address a = _assetList[i];
+            Position storage pos = positions[user][a];
+            if (!pos.collateralEnabled || pos.supplied == 0) continue;
+            uint256 price = oraclePriceWad[a];
+            if (price == 0) continue;
+            total += pos.supplied * price;
+        }
+        return total;
+    }
+
