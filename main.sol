@@ -142,3 +142,51 @@ contract BladeForgeVault {
 
     modifier assetListed(address asset) {
         if (!isListedAsset[asset]) revert BladeForge_AssetNotListed();
+        _;
+    }
+
+    constructor() {
+        GOVERNOR = msg.sender;
+        FEE_RECIPIENT = 0x1a2B3c4D5e6F7A8b9C0d1E2f3A4b5C6d7E8f9A0b;
+        PRICE_FEED = 0x7f6E5D4c3B2a1098F7e6d5c4B3a2019f8E7d6C5b;
+        TREASURY_BACKUP = 0x3C4d5E6f7A8B9c0D1e2F3a4B5c6D7e8F9a0B1c2D;
+        DEPLOY_TIMESTAMP = block.timestamp;
+        DOMAIN_SEPARATOR = keccak256(abi.encode(keccak256("BladeForgeVault(uint256 chainId,address vault)"), block.chainid, address(this)));
+    }
+
+    function listAsset(
+        address asset,
+        uint256 collateralFactorBps,
+        uint256 liquidationThresholdBps,
+        uint256 liquidationBonusBps,
+        uint256 reserveFactorBps,
+        uint256 baseRatePerBlock,
+        uint256 slope1PerBlock,
+        uint256 slope2PerBlock,
+        uint256 optimalUtilizationBps
+    ) external onlyGovernor nonReentrant {
+        if (asset == address(0)) revert BladeForge_ZeroAddress();
+        if (isListedAsset[asset]) revert BladeForge_AssetAlreadyListed();
+        if (assetCount >= MAX_ASSETS) revert BladeForge_MaxAssetsReached();
+        if (collateralFactorBps < MIN_COLLATERAL_FACTOR_BPS || collateralFactorBps > MAX_COLLATERAL_FACTOR_BPS) revert BladeForge_InvalidConfig();
+        if (liquidationThresholdBps < MIN_LIQUIDATION_THRESHOLD_BPS || liquidationThresholdBps > MAX_LIQUIDATION_THRESHOLD_BPS) revert BladeForge_InvalidConfig();
+        if (liquidationBonusBps < LIQUIDATION_BONUS_BPS_MIN || liquidationBonusBps > LIQUIDATION_BONUS_BPS_MAX) revert BladeForge_InvalidConfig();
+        if (reserveFactorBps > PROTOCOL_FEE_BPS_CAP) revert BladeForge_InvalidConfig();
+        if (optimalUtilizationBps == 0 || optimalUtilizationBps > BPS_DENOM) revert BladeForge_InvalidConfig();
+
+        _assetList.push(asset);
+        assetIndexMap[asset] = _assetList.length;
+        isListedAsset[asset] = true;
+        assetCount++;
+
+        assetConfigs[asset] = AssetConfig({
+            allowed: true,
+            borrowEnabled: true,
+            depositsFrozen: false,
+            collateralFactorBps: collateralFactorBps,
+            liquidationThresholdBps: liquidationThresholdBps,
+            liquidationBonusBps: liquidationBonusBps,
+            reserveFactorBps: reserveFactorBps,
+            baseRatePerBlock: baseRatePerBlock,
+            slope1PerBlock: slope1PerBlock,
+            slope2PerBlock: slope2PerBlock,
