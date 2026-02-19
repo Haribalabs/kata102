@@ -958,3 +958,47 @@ contract BladeForgeVault {
                 utilizationWad: util,
                 ratePerBlock: rate,
                 apyBpsEst: apyBps,
+                priceWad: oraclePriceWad[a],
+                borrowEnabled: c.borrowEnabled,
+                depositsFrozen: c.depositsFrozen,
+                collateralFactorBps: c.collateralFactorBps,
+                liquidationThresholdBps: c.liquidationThresholdBps
+            });
+        }
+        return out;
+    }
+
+    /// @notice Returns aggregated user dashboard metrics for a given user (collateral, debt, health, liquidatable flag).
+    function getDashboardUser(address user) external view returns (
+        uint256 totalCollateralWad,
+        uint256 totalDebtWad,
+        uint256 healthWad,
+        bool liquidatable
+    ) {
+        totalCollateralWad = _totalCollateralValueWad(user);
+        totalDebtWad = 0;
+        uint256 thresholdVal = 0;
+        for (uint256 i = 0; i < _assetList.length; i++) {
+            address a = _assetList[i];
+            uint256 b = _borrowBalanceInternal(user, a);
+            if (b > 0 && oraclePriceWad[a] > 0) totalDebtWad += b * oraclePriceWad[a];
+            Position storage pos = positions[user][a];
+            if (pos.collateralEnabled && pos.supplied > 0 && oraclePriceWad[a] > 0)
+                thresholdVal += (pos.supplied * oraclePriceWad[a] * assetConfigs[a].liquidationThresholdBps) / BPS_DENOM;
+        }
+        healthWad = totalDebtWad == 0 ? type(uint256).max : (thresholdVal * SCALE) / totalDebtWad;
+        liquidatable = healthWad < MIN_HEALTH_FACTOR_LIQUIDATABLE;
+    }
+
+    /// @dev Chain-specific constant for approximate blocks per year (e.g. 12s blocks).
+    function getBlocksPerYearEst() external pure returns (uint256) {
+        return BLOCKS_PER_YEAR_EST;
+    }
+
+    /// @notice Returns true if the vault is operational (not paused).
+    function isOperational() external view returns (bool) {
+        return !vaultPaused;
+    }
+
+    receive() external payable {}
+}
