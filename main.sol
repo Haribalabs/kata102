@@ -94,3 +94,51 @@ contract BladeForgeVault {
     event AssetListed(address indexed asset, uint256 collateralFactorBps, uint256 liquidationThresholdBps);
     event AssetConfigUpdated(address indexed asset, bool borrowEnabled, uint256 reserveFactorBps);
     event Supply(address indexed user, address indexed asset, uint256 amount);
+    event Withdraw(address indexed user, address indexed asset, uint256 amount);
+    event Borrow(address indexed user, address indexed asset, uint256 amount, uint256 newHealthWad);
+    event Repay(address indexed user, address indexed asset, uint256 amount);
+    event Liquidate(address indexed liquidator, address indexed user, address indexed collateralAsset, address debtAsset, uint256 debtCovered, uint256 collateralSeized);
+    event CollateralToggled(address indexed user, address indexed asset, bool enabled);
+    event PriceUpdated(address indexed asset, uint256 priceWad);
+    event FeeSwept(address indexed recipient, uint256 amountWei);
+    event VaultPauseToggled(bool paused);
+
+    error BladeForge_Unauthorized();
+    error BladeForge_VaultPaused();
+    error BladeForge_AssetNotListed();
+    error BladeForge_BorrowDisabled();
+    error BladeForge_DepositsFrozen();
+    error BladeForge_InvalidAmount();
+    error BladeForge_InvalidConfig();
+    error BladeForge_HealthFactorTooLow();
+    error BladeForge_ExceedsCollateralCapacity();
+    error BladeForge_Reentrancy();
+    error BladeForge_TransferFailed();
+    error BladeForge_MaxAssetsReached();
+    error BladeForge_AssetAlreadyListed();
+    error BladeForge_ZeroAddress();
+    error BladeForge_NotLiquidatable();
+    error BladeForge_SelfLiquidation();
+    error BladeForge_BorrowCapExceeded();
+    error BladeForge_SupplyCapExceeded();
+    error BladeForge_EmergencyOnlyWhenPaused();
+
+    modifier nonReentrant() {
+        if (_lock != 0) revert BladeForge_Reentrancy();
+        _lock = LOCK_SLOT;
+        _;
+        _lock = 0;
+    }
+
+    modifier whenNotPaused() {
+        if (vaultPaused) revert BladeForge_VaultPaused();
+        _;
+    }
+
+    modifier onlyGovernor() {
+        if (msg.sender != GOVERNOR) revert BladeForge_Unauthorized();
+        _;
+    }
+
+    modifier assetListed(address asset) {
+        if (!isListedAsset[asset]) revert BladeForge_AssetNotListed();
