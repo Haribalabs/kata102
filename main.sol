@@ -862,3 +862,51 @@ contract BladeForgeVault {
     ) {
         return (GOVERNOR, FEE_RECIPIENT, PRICE_FEED, TREASURY_BACKUP);
     }
+
+    function getDomainSeparator() external view returns (bytes32) {
+        return DOMAIN_SEPARATOR;
+    }
+
+    function getDeployTimestamp() external view returns (uint256) {
+        return DEPLOY_TIMESTAMP;
+    }
+
+    function getAssetCount() external view returns (uint256) {
+        return _assetList.length;
+    }
+
+    function getAssetAt(uint256 index) external view returns (address) {
+        if (index >= _assetList.length) revert BladeForge_InvalidConfig();
+        return _assetList[index];
+    }
+
+    function getTotalSupply(address asset) external view returns (uint256) {
+        return assetStates[asset].totalSupply;
+    }
+
+    function getTotalBorrows(address asset) external view returns (uint256) {
+        return assetStates[asset].totalBorrows;
+    }
+
+    function getSupplyBalance(address user, address asset) external view returns (uint256) {
+        return positions[user][asset].supplied;
+    }
+
+    function getBorrowIndex(address asset) external view returns (uint256) {
+        return assetStates[asset].indexCumulative;
+    }
+
+    function getOraclePrice(address asset) external view returns (uint256) {
+        return oraclePriceWad[asset];
+    }
+
+    function getCollateralEnabled(address user, address asset) external view returns (bool) {
+        return positions[user][asset].collateralEnabled;
+    }
+
+    function canBorrow(address asset) external view returns (bool) {
+        return isListedAsset[asset] && assetConfigs[asset].borrowEnabled && !vaultPaused;
+    }
+
+    function canSupply(address asset) external view returns (bool) {
+        return isListedAsset[asset] && !assetConfigs[asset].depositsFrozen && !vaultPaused;
