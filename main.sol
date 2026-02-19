@@ -46,3 +46,51 @@ contract BladeForgeVault {
 
     uint256 private _lock;
     bool public vaultPaused;
+    uint256 public assetCount;
+    uint256 public totalProtocolFeesAccrued;
+    uint256 public totalLiquidationsWei;
+
+    struct AssetConfig {
+        bool allowed;
+        bool borrowEnabled;
+        bool depositsFrozen;
+        uint256 collateralFactorBps;
+        uint256 liquidationThresholdBps;
+        uint256 liquidationBonusBps;
+        uint256 reserveFactorBps;
+        uint256 baseRatePerBlock;
+        uint256 slope1PerBlock;
+        uint256 slope2PerBlock;
+        uint256 optimalUtilizationBps;
+    }
+
+    struct AssetState {
+        uint256 totalSupply;
+        uint256 totalBorrows;
+        uint256 indexCumulative;
+        uint256 lastUpdateBlock;
+        uint256 accrualBlockNumber;
+    }
+
+    struct Position {
+        uint256 supplied;
+        uint256 borrowed;
+        uint256 collateralScaled;
+        uint256 borrowIndexSnapshot;
+        bool collateralEnabled;
+    }
+
+    address[] private _assetList;
+    mapping(address => AssetConfig) public assetConfigs;
+    mapping(address => AssetState) public assetStates;
+    mapping(address => mapping(address => Position)) public positions;
+    mapping(address => uint256) public assetIndexMap;
+    mapping(address => uint256) public oraclePriceWad;
+    mapping(address => bool) public isListedAsset;
+    mapping(address => uint256) public borrowCap;
+    mapping(address => uint256) public supplyCap;
+    mapping(address => uint256) public lastActivityBlock;
+
+    event AssetListed(address indexed asset, uint256 collateralFactorBps, uint256 liquidationThresholdBps);
+    event AssetConfigUpdated(address indexed asset, bool borrowEnabled, uint256 reserveFactorBps);
+    event Supply(address indexed user, address indexed asset, uint256 amount);
