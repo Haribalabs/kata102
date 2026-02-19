@@ -334,3 +334,51 @@ contract BladeForgeVault {
             if (health < MIN_HEALTH_FACTOR_LIQUIDATABLE) revert BladeForge_HealthFactorTooLow();
         }
 
+        pos.supplied = supplied - amount;
+        pos.borrowIndexSnapshot = assetStates[asset].indexCumulative;
+        assetStates[asset].totalSupply -= amount;
+
+        if (!IERC20Minimal(asset).transfer(msg.sender, amount)) revert BladeForge_TransferFailed();
+        emit Withdraw(msg.sender, asset, amount);
+    }
+
+    function setCollateralEnabled(address asset, bool enabled) external nonReentrant whenNotPaused assetListed(asset) {
+        _accrueInterest(asset);
+        Position storage pos = positions[msg.sender][asset];
+        uint256 borrows = _borrowBalanceInternal(msg.sender, asset);
+        if (enabled && borrows > 0) {
+            uint256 health = _healthFactorWad(msg.sender, asset, pos.supplied, borrows);
+            if (health < MIN_HEALTH_FACTOR_LIQUIDATABLE) revert BladeForge_HealthFactorTooLow();
+        }
+        pos.collateralEnabled = enabled;
+        pos.borrowIndexSnapshot = assetStates[asset].indexCumulative;
+        emit CollateralToggled(msg.sender, asset, enabled);
+    }
+
+    function borrow(address asset, uint256 amount) external nonReentrant whenNotPaused assetListed(asset) {
+        if (amount == 0) revert BladeForge_InvalidAmount();
+        if (!assetConfigs[asset].borrowEnabled) revert BladeForge_BorrowDisabled();
+        uint256 cap = borrowCap[asset];
+        if (cap != 0 && assetStates[asset].totalBorrows + amount > cap) revert BladeForge_BorrowCapExceeded();
+
+        _accrueInterest(asset);
+
+        uint256 borrowsBefore = _borrowBalanceInternal(msg.sender, asset);
+        uint256 newBorrows = borrowsBefore + amount;
+        uint256 collateralValueWad = _totalCollateralValueWad(msg.sender);
+        uint256 borrowValueWad = _totalBorrowValueWad(msg.sender, asset, newBorrows);
+        uint256 capacity = (collateralValueWad * assetConfigs[asset].collateralFactorBps) / BPS_DENOM;
+        if (borrowValueWad > capacity) revert BladeForge_ExceedsCollateralCapacity();
+
+        uint256 health = _healthFactorWad(msg.sender, asset, positions[msg.sender][asset].supplied, newBorrows);
+        if (health < MIN_HEALTH_FACTOR_LIQUIDATABLE) revert BladeForge_HealthFactorTooLow();
+
+        Position storage pos = positions[msg.sender][asset];
+        pos.borrowed += amount;
+        pos.borrowIndexSnapshot = assetStates[asset].indexCumulative;
+        assetStates[asset].totalBorrows += amount;
+        lastActivityBlock[asset] = block.number;
+
+        if (!IERC20Minimal(asset).transfer(msg.sender, amount)) revert BladeForge_TransferFailed();
+        emit Borrow(msg.sender, asset, amount, health);
+    }
