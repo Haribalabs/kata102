@@ -622,3 +622,51 @@ contract BladeForgeVault {
     }
 
     function getTotalValueLockedWad() external view returns (uint256 totalSupplyValueWad) {
+        for (uint256 i = 0; i < _assetList.length; i++) {
+            address a = _assetList[i];
+            uint256 supply = assetStates[a].totalSupply;
+            if (supply > 0 && oraclePriceWad[a] > 0) totalSupplyValueWad += supply * oraclePriceWad[a];
+        }
+    }
+
+    function getMaxBorrowCapacityWad(address user, address borrowAsset) external view returns (uint256) {
+        uint256 collateralVal = _totalCollateralValueWad(user);
+        uint256 currentBorrowVal = _totalBorrowValueWad(user, borrowAsset, 0);
+        uint256 capacityVal = (collateralVal * assetConfigs[borrowAsset].collateralFactorBps) / BPS_DENOM;
+        if (currentBorrowVal >= capacityVal) return 0;
+        uint256 price = oraclePriceWad[borrowAsset];
+        if (price == 0) return 0;
+        return (capacityVal - currentBorrowVal) / price;
+    }
+
+    function getLiquidationPriceWad(address user, address collateralAsset, address debtAsset) external view returns (uint256 priceWad) {
+        uint256 debtVal = 0;
+        for (uint256 i = 0; i < _assetList.length; i++) {
+            address a = _assetList[i];
+            uint256 b = _borrowBalanceInternal(user, a);
+            if (b > 0 && oraclePriceWad[a] > 0) debtVal += b * oraclePriceWad[a];
+        }
+        Position storage pos = positions[user][collateralAsset];
+        if (pos.supplied == 0 || debtVal == 0) return 0;
+        uint256 thresholdBps = assetConfigs[collateralAsset].liquidationThresholdBps;
+        return (debtVal * BPS_DENOM) / (pos.supplied * thresholdBps);
+    }
+
+    function getMarketStats() external view returns (
+        uint256 totalAssets,
+        uint256 totalTvlWad,
+        uint256 totalFeesAccrued,
+        uint256 totalLiquidationsWei,
+        uint256 deployTs,
+        bool paused
+    ) {
+        totalAssets = _assetList.length;
+        totalTvlWad = 0;
+        for (uint256 i = 0; i < _assetList.length; i++) {
+            address a = _assetList[i];
+            uint256 s = assetStates[a].totalSupply;
+            if (s > 0 && oraclePriceWad[a] > 0) totalTvlWad += s * oraclePriceWad[a];
+        }
+        return (
+            totalAssets,
+            totalTvlWad,
