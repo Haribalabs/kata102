@@ -574,3 +574,51 @@ contract BladeForgeVault {
     }
 
     function getPositionSummary(address user) external view returns (PositionSummary[] memory) {
+        uint256 n = _assetList.length;
+        PositionSummary[] memory out = new PositionSummary[](n);
+        for (uint256 i = 0; i < n; i++) {
+            address a = _assetList[i];
+            Position storage pos = positions[user][a];
+            out[i] = PositionSummary({
+                asset: a,
+                supplied: pos.supplied,
+                borrowed: pos.borrowed,
+                borrowBalanceCurrent: _borrowBalanceInternal(user, a),
+                collateralEnabled: pos.collateralEnabled,
+                priceWad: oraclePriceWad[a]
+            });
+        }
+        return out;
+    }
+
+    struct AssetStateFull {
+        address asset;
+        uint256 totalSupply;
+        uint256 totalBorrows;
+        uint256 indexCumulative;
+        uint256 utilizationWad;
+        uint256 currentRatePerBlock;
+        uint256 borrowCapLimit;
+        uint256 supplyCapLimit;
+        uint256 oraclePriceWad;
+    }
+
+    function getAssetStateFull(address asset) external view returns (AssetStateFull memory) {
+        if (!isListedAsset[asset]) revert BladeForge_AssetNotListed();
+        AssetState storage state = assetStates[asset];
+        uint256 util = state.totalSupply == 0 ? 0 : (state.totalBorrows * SCALE) / state.totalSupply;
+        uint256 rate = state.totalSupply == 0 ? assetConfigs[asset].baseRatePerBlock : _computeRatePerBlock(assetConfigs[asset], util);
+        return AssetStateFull({
+            asset: asset,
+            totalSupply: state.totalSupply,
+            totalBorrows: state.totalBorrows,
+            indexCumulative: state.indexCumulative,
+            utilizationWad: util,
+            currentRatePerBlock: rate,
+            borrowCapLimit: borrowCap[asset],
+            supplyCapLimit: supplyCap[asset],
+            oraclePriceWad: oraclePriceWad[asset]
+        });
+    }
+
+    function getTotalValueLockedWad() external view returns (uint256 totalSupplyValueWad) {
