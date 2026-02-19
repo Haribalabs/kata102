@@ -382,3 +382,51 @@ contract BladeForgeVault {
         if (!IERC20Minimal(asset).transfer(msg.sender, amount)) revert BladeForge_TransferFailed();
         emit Borrow(msg.sender, asset, amount, health);
     }
+
+    function repay(address asset, uint256 amount) external nonReentrant whenNotPaused assetListed(asset) {
+        if (amount == 0) revert BladeForge_InvalidAmount();
+
+        _accrueInterest(asset);
+
+        uint256 owed = _borrowBalanceInternal(msg.sender, asset);
+        uint256 payAmount = amount > owed ? owed : amount;
+
+        Position storage pos = positions[msg.sender][asset];
+        AssetState storage state = assetStates[asset];
+        uint256 index = state.indexCumulative;
+        uint256 principalRepay = (payAmount * pos.borrowIndexSnapshot) / index;
+        if (principalRepay > pos.borrowed) principalRepay = pos.borrowed;
+
+        pos.borrowed -= principalRepay;
+        pos.borrowIndexSnapshot = index;
+        state.totalBorrows -= principalRepay;
+
+        uint256 balBefore = IERC20Minimal(asset).balanceOf(address(this));
+        if (!IERC20Minimal(asset).transferFrom(msg.sender, address(this), payAmount)) revert BladeForge_TransferFailed();
+        uint256 received = IERC20Minimal(asset).balanceOf(address(this)) - balBefore;
+        if (received != payAmount) revert BladeForge_TransferFailed();
+
+        emit Repay(msg.sender, asset, payAmount);
+    }
+
+    function liquidate(
+        address user,
+        address collateralAsset,
+        address debtAsset,
+        uint256 debtToCover
+    ) external nonReentrant whenNotPaused assetListed(collateralAsset) assetListed(debtAsset) {
+        if (user == msg.sender) revert BladeForge_SelfLiquidation();
+        if (debtToCover == 0) revert BladeForge_InvalidAmount();
+
+        _accrueInterest(collateralAsset);
+        _accrueInterest(debtAsset);
+
+        uint256 debtBalance = _borrowBalanceInternal(user, debtAsset);
+        if (debtToCover > debtBalance) debtToCover = debtBalance;
+
+        uint256 health = _healthFactorWad(user, debtAsset, positions[user][collateralAsset].supplied, debtBalance);
+        if (health >= MIN_HEALTH_FACTOR_LIQUIDATABLE) revert BladeForge_NotLiquidatable();
+
+        AssetConfig memory collateralConfig = assetConfigs[collateralAsset];
+        uint256 bonusBps = collateralConfig.liquidationBonusBps;
+        uint256 debtPrice = oraclePriceWad[debtAsset];
