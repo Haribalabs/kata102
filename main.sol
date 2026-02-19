@@ -190,3 +190,51 @@ contract BladeForgeVault {
             baseRatePerBlock: baseRatePerBlock,
             slope1PerBlock: slope1PerBlock,
             slope2PerBlock: slope2PerBlock,
+            optimalUtilizationBps: optimalUtilizationBps
+        });
+
+        assetStates[asset] = AssetState({
+            totalSupply: 0,
+            totalBorrows: 0,
+            indexCumulative: SCALE,
+            lastUpdateBlock: block.number,
+            accrualBlockNumber: block.number
+        });
+
+        emit AssetListed(asset, collateralFactorBps, liquidationThresholdBps);
+    }
+
+    function setOraclePrice(address asset, uint256 priceWad) external {
+        if (msg.sender != PRICE_FEED && msg.sender != GOVERNOR) revert BladeForge_Unauthorized();
+        if (asset == address(0) || !isListedAsset[asset]) revert BladeForge_AssetNotListed();
+        oraclePriceWad[asset] = priceWad;
+        emit PriceUpdated(asset, priceWad);
+    }
+
+    function setBorrowEnabled(address asset, bool enabled) external onlyGovernor {
+        if (!isListedAsset[asset]) revert BladeForge_AssetNotListed();
+        assetConfigs[asset].borrowEnabled = enabled;
+        emit AssetConfigUpdated(asset, enabled, assetConfigs[asset].reserveFactorBps);
+    }
+
+    function setDepositsFrozen(address asset, bool frozen) external onlyGovernor {
+        if (!isListedAsset[asset]) revert BladeForge_AssetNotListed();
+        assetConfigs[asset].depositsFrozen = frozen;
+        emit AssetConfigUpdated(asset, assetConfigs[asset].borrowEnabled, assetConfigs[asset].reserveFactorBps);
+    }
+
+    function setReserveFactorBps(address asset, uint256 reserveFactorBps) external onlyGovernor {
+        if (!isListedAsset[asset]) revert BladeForge_AssetNotListed();
+        if (reserveFactorBps > PROTOCOL_FEE_BPS_CAP) revert BladeForge_InvalidConfig();
+        assetConfigs[asset].reserveFactorBps = reserveFactorBps;
+        emit AssetConfigUpdated(asset, assetConfigs[asset].borrowEnabled, reserveFactorBps);
+    }
+
+    function setBorrowCap(address asset, uint256 cap) external onlyGovernor {
+        if (!isListedAsset[asset]) revert BladeForge_AssetNotListed();
+        if (cap != 0 && assetStates[asset].totalBorrows > cap) revert BladeForge_InvalidConfig();
+        borrowCap[asset] = cap;
+    }
+
+    function setSupplyCap(address asset, uint256 cap) external onlyGovernor {
+        if (!isListedAsset[asset]) revert BladeForge_AssetNotListed();
