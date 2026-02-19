@@ -238,3 +238,51 @@ contract BladeForgeVault {
 
     function setSupplyCap(address asset, uint256 cap) external onlyGovernor {
         if (!isListedAsset[asset]) revert BladeForge_AssetNotListed();
+        if (cap != 0 && assetStates[asset].totalSupply > cap) revert BladeForge_InvalidConfig();
+        supplyCap[asset] = cap;
+    }
+
+    function setOraclePrices(address[] calldata assets, uint256[] calldata pricesWad) external {
+        if (msg.sender != PRICE_FEED && msg.sender != GOVERNOR) revert BladeForge_Unauthorized();
+        if (assets.length != pricesWad.length) revert BladeForge_InvalidConfig();
+        for (uint256 i = 0; i < assets.length; i++) {
+            if (assets[i] != address(0) && isListedAsset[assets[i]]) {
+                oraclePriceWad[assets[i]] = pricesWad[i];
+                emit PriceUpdated(assets[i], pricesWad[i]);
+            }
+        }
+    }
+
+    function toggleVaultPause() external onlyGovernor {
+        vaultPaused = !vaultPaused;
+        emit VaultPauseToggled(vaultPaused);
+    }
+
+    function _accrueInterest(address asset) internal {
+        AssetState storage state = assetStates[asset];
+        AssetConfig memory config = assetConfigs[asset];
+        if (block.number <= state.accrualBlockNumber) return;
+
+        uint256 totalSupply = state.totalSupply;
+        uint256 totalBorrows = state.totalBorrows;
+        uint256 index = state.indexCumulative;
+
+        if (totalBorrows > 0 && totalSupply > 0) {
+            uint256 blocksElapsed = block.number - state.accrualBlockNumber;
+            uint256 utilization = (totalBorrows * SCALE) / totalSupply;
+            uint256 ratePerBlock = _computeRatePerBlock(config, utilization);
+            uint256 interestScaled = (totalBorrows * ratePerBlock * blocksElapsed) / SCALE;
+            uint256 protocolShare = (interestScaled * config.reserveFactorBps) / BPS_DENOM;
+            totalProtocolFeesAccrued += protocolShare;
+            state.totalBorrows += interestScaled;
+            state.totalSupply += interestScaled;
+            index = (index * (SCALE + (ratePerBlock * blocksElapsed))) / SCALE;
+        }
+
+        state.indexCumulative = index;
+        state.accrualBlockNumber = block.number;
+        state.lastUpdateBlock = block.number;
+    }
+
+    function _computeRatePerBlock(AssetConfig memory config, uint256 utilizationWad) internal pure returns (uint256) {
+        uint256 opt = (config.optimalUtilizationBps * SCALE) / BPS_DENOM;
